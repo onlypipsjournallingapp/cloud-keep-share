@@ -1,19 +1,102 @@
 
 import React, { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { FileText, Download, Trash2, FileSymlink } from "lucide-react";
+import { FileText, Download, Trash2 } from "lucide-react";
 import FileUploader from "@/components/FileUploader";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
+import { useAuth } from "@/hooks/useAuth";
 
 type FileItem = {
   id: string;
-  file: File;
-  uploadedAt: Date;
-  url: string; // This would be populated by backend in a real app
+  filename: string;
+  file_type: string;
+  size_bytes: number | null;
+  created_at: string;
+  storage_path: string;
 };
 
 const FilesTab = () => {
-  const [files, setFiles] = useState<FileItem[]>([]);
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+
+  const { data: files = [], isLoading } = useQuery({
+    queryKey: ['files'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('files')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      if (error) {
+        toast.error(error.message);
+        return [];
+      }
+      return data;
+    },
+  });
+
+  const uploadFile = useMutation({
+    mutationFn: async (file: File) => {
+      if (!user) throw new Error("User not authenticated");
+
+      const fileExt = file.name.split('.').pop();
+      const storagePath = `${user.id}/${Date.now()}-${file.name}`;
+
+      // Upload to storage
+      const { error: uploadError } = await supabase.storage
+        .from('user-files')
+        .upload(storagePath, file);
+
+      if (uploadError) throw uploadError;
+
+      // Save file metadata
+      const { error: dbError } = await supabase.from('files').insert({
+        filename: file.name,
+        file_type: file.type,
+        size_bytes: file.size,
+        storage_path: storagePath,
+        user_id: user.id
+      });
+
+      if (dbError) throw dbError;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['files'] });
+      toast.success("File uploaded successfully");
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+
+  const deleteFile = useMutation({
+    mutationFn: async (file: FileItem) => {
+      // Delete from storage
+      const { error: storageError } = await supabase.storage
+        .from('user-files')
+        .remove([file.storage_path]);
+
+      if (storageError) throw storageError;
+
+      // Delete metadata
+      const { error: dbError } = await supabase
+        .from('files')
+        .delete()
+        .eq('id', file.id);
+
+      if (dbError) throw dbError;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['files'] });
+      toast.success("File deleted successfully");
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
 
   const handleFilesAdded = (newFiles: File[]) => {
     const pdfFiles = newFiles.filter(file => 
@@ -21,23 +104,40 @@ const FilesTab = () => {
       file.name.toLowerCase().endsWith('.pdf')
     );
 
-    if (pdfFiles.length === 0) return;
+    if (pdfFiles.length === 0) {
+      toast.error("Only PDF files are accepted");
+      return;
+    }
 
-    const newFileItems = pdfFiles.map(file => ({
-      id: Date.now() + "-" + file.name,
-      file,
-      uploadedAt: new Date(),
-      url: URL.createObjectURL(file) // In a real app, this would be a server URL
-    }));
-
-    setFiles(prev => [...newFileItems, ...prev]);
+    pdfFiles.forEach(file => {
+      uploadFile.mutate(file);
+    });
   };
 
-  const handleDelete = (id: string) => {
-    setFiles(files.filter(file => file.id !== id));
+  const handleDownload = async (file: FileItem) => {
+    try {
+      const { data, error } = await supabase.storage
+        .from('user-files')
+        .download(file.storage_path);
+
+      if (error) throw error;
+
+      // Create download link
+      const url = URL.createObjectURL(data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = file.filename;
+      document.body.appendChild(a);
+      a.click();
+      URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error: any) {
+      toast.error(error.message);
+    }
   };
 
-  const formatFileSize = (bytes: number) => {
+  const formatFileSize = (bytes: number | null) => {
+    if (!bytes) return 'Unknown size';
     if (bytes === 0) return '0 Bytes';
     const k = 1024;
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
@@ -45,13 +145,13 @@ const FilesTab = () => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  const formatDate = (date: Date) => {
-    return new Intl.DateTimeFormat('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
-    }).format(date);
-  };
+  if (isLoading) {
+    return (
+      <div className="text-center p-8">
+        <p>Loading files...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -80,45 +180,32 @@ const FilesTab = () => {
         </div>
       ) : (
         <div className="grid gap-4">
-          {files.map((fileItem) => (
-            <Card key={fileItem.id} className="flex flex-col md:flex-row md:items-center">
+          {files.map((file) => (
+            <Card key={file.id} className="flex flex-col md:flex-row md:items-center">
               <div className="flex items-center p-4 flex-1">
                 <div className="bg-primary/10 p-2 rounded mr-3">
                   <FileText className="h-8 w-8 text-primary" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h3 className="font-medium truncate">{fileItem.file.name}</h3>
-                  <div className="flex text-xs text-muted-foreground mt-1 space-x-2">
-                    <span>{formatFileSize(fileItem.file.size)}</span>
-                    <span>•</span>
-                    <span>{formatDate(fileItem.uploadedAt)}</span>
+                  <h3 className="font-medium truncate">{file.filename}</h3>
+                  <div className="flex text-xs text-muted-foreground mt-1">
+                    <span>{formatFileSize(file.size_bytes)}</span>
                   </div>
                 </div>
               </div>
               <div className="flex items-center p-4 border-t md:border-t-0 md:border-l border-border">
-                <Button variant="ghost" size="icon" asChild>
-                  <a
-                    href={fileItem.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <FileSymlink className="h-4 w-4" />
-                    <span className="sr-only">View file</span>
-                  </a>
-                </Button>
-                <Button variant="ghost" size="icon" asChild>
-                  <a
-                    href={fileItem.url}
-                    download={fileItem.file.name}
-                  >
-                    <Download className="h-4 w-4" />
-                    <span className="sr-only">Download file</span>
-                  </a>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => handleDownload(file)}
+                >
+                  <Download className="h-4 w-4" />
+                  <span className="sr-only">Download file</span>
                 </Button>
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => handleDelete(fileItem.id)}
+                  onClick={() => deleteFile.mutate(file)}
                 >
                   <Trash2 className="h-4 w-4" />
                   <span className="sr-only">Delete file</span>

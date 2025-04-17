@@ -1,23 +1,44 @@
 
 import React, { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Link, Edit, Trash2, ExternalLink } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
+import { useAuth } from "@/hooks/useAuth";
 
 type SavedLink = {
   id: string;
   url: string;
-  description: string;
-  createdAt: Date;
+  description: string | null;
+  created_at: string;
 };
 
 const LinksTab = () => {
-  const [links, setLinks] = useState<SavedLink[]>([]);
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [url, setUrl] = useState("");
   const [description, setDescription] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  const { data: links = [], isLoading } = useQuery({
+    queryKey: ['links'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('links')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      if (error) {
+        toast.error(error.message);
+        return [];
+      }
+      return data;
+    },
+  });
 
   const isValidUrl = (urlString: string) => {
     try {
@@ -28,51 +49,83 @@ const LinksTab = () => {
     }
   };
 
-  const handleCreateLink = () => {
-    if (!url.trim() || !isValidUrl(url)) return;
-    
-    const newLink: SavedLink = {
-      id: Date.now().toString(),
-      url: url.trim(),
-      description: description.trim(),
-      createdAt: new Date(),
-    };
-    
-    setLinks([newLink, ...links]);
-    setUrl("");
-    setDescription("");
-  };
+  const createLink = useMutation({
+    mutationFn: async () => {
+      if (!user || !isValidUrl(url)) throw new Error("Invalid URL or user not authenticated");
+      
+      const { error } = await supabase.from('links').insert({
+        url: url.trim(),
+        description: description.trim() || null,
+        user_id: user.id
+      });
+      
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['links'] });
+      setUrl("");
+      setDescription("");
+      toast.success("Link saved successfully");
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
 
-  const handleEditLink = (link: SavedLink) => {
-    setUrl(link.url);
-    setDescription(link.description);
-    setEditingId(link.id);
-  };
-
-  const handleUpdateLink = () => {
-    if (!url.trim() || !isValidUrl(url) || !editingId) return;
-    
-    setLinks(
-      links.map((link) =>
-        link.id === editingId
-          ? { ...link, url: url.trim(), description: description.trim() }
-          : link
-      )
-    );
-    
-    setUrl("");
-    setDescription("");
-    setEditingId(null);
-  };
-
-  const handleDeleteLink = (id: string) => {
-    setLinks(links.filter((link) => link.id !== id));
-    
-    if (editingId === id) {
+  const updateLink = useMutation({
+    mutationFn: async () => {
+      if (!editingId || !user || !isValidUrl(url)) 
+        throw new Error("Invalid operation");
+      
+      const { error } = await supabase
+        .from('links')
+        .update({
+          url: url.trim(),
+          description: description.trim() || null,
+        })
+        .eq('id', editingId);
+      
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['links'] });
       setUrl("");
       setDescription("");
       setEditingId(null);
-    }
+      toast.success("Link updated successfully");
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+
+  const deleteLink = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from('links')
+        .delete()
+        .eq('id', id);
+      
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['links'] });
+      if (editingId) {
+        setUrl("");
+        setDescription("");
+        setEditingId(null);
+      }
+      toast.success("Link deleted successfully");
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+
+  const handleEditLink = (link: SavedLink) => {
+    setUrl(link.url);
+    setDescription(link.description || "");
+    setEditingId(link.id);
   };
 
   const getHostname = (url: string) => {
@@ -82,6 +135,14 @@ const LinksTab = () => {
       return url;
     }
   };
+
+  if (isLoading) {
+    return (
+      <div className="text-center p-8">
+        <p>Loading links...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -118,7 +179,7 @@ const LinksTab = () => {
             Cancel
           </Button>
           <Button 
-            onClick={editingId ? handleUpdateLink : handleCreateLink}
+            onClick={() => editingId ? updateLink.mutate() : createLink.mutate()}
             disabled={!url.trim() || !isValidUrl(url)}
           >
             {editingId ? "Update Link" : "Add Link"}
@@ -181,7 +242,7 @@ const LinksTab = () => {
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={() => handleDeleteLink(link.id)}
+                  onClick={() => deleteLink.mutate(link.id)}
                 >
                   <Trash2 className="h-4 w-4 mr-2" />
                   Delete

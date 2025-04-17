@@ -1,70 +1,130 @@
 
 import React, { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Plus, Edit, Trash2 } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
+import { useAuth } from "@/hooks/useAuth";
 
 type Note = {
   id: string;
   title: string;
-  content: string;
-  createdAt: Date;
+  content: string | null;
+  created_at: string;
 };
 
 const NotesTab = () => {
-  const [notes, setNotes] = useState<Note[]>([]);
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  const handleCreateNote = () => {
-    if (!title.trim()) return;
-    
-    const newNote: Note = {
-      id: Date.now().toString(),
-      title: title.trim(),
-      content: content.trim(),
-      createdAt: new Date(),
-    };
-    
-    setNotes([newNote, ...notes]);
-    setTitle("");
-    setContent("");
-  };
+  const { data: notes = [], isLoading } = useQuery({
+    queryKey: ['notes'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('notes')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      if (error) {
+        toast.error(error.message);
+        return [];
+      }
+      return data;
+    },
+  });
 
-  const handleEditNote = (note: Note) => {
-    setTitle(note.title);
-    setContent(note.content);
-    setEditingId(note.id);
-  };
+  const createNote = useMutation({
+    mutationFn: async () => {
+      if (!user) throw new Error("User not authenticated");
+      
+      const { error } = await supabase.from('notes').insert({
+        title: title.trim(),
+        content: content.trim(),
+        user_id: user.id
+      });
+      
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notes'] });
+      setTitle("");
+      setContent("");
+      toast.success("Note created successfully");
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
 
-  const handleUpdateNote = () => {
-    if (!title.trim() || !editingId) return;
-    
-    setNotes(
-      notes.map((note) =>
-        note.id === editingId
-          ? { ...note, title: title.trim(), content: content.trim() }
-          : note
-      )
-    );
-    
-    setTitle("");
-    setContent("");
-    setEditingId(null);
-  };
-
-  const handleDeleteNote = (id: string) => {
-    setNotes(notes.filter((note) => note.id !== id));
-    
-    if (editingId === id) {
+  const updateNote = useMutation({
+    mutationFn: async () => {
+      if (!editingId || !user) throw new Error("Invalid operation");
+      
+      const { error } = await supabase
+        .from('notes')
+        .update({
+          title: title.trim(),
+          content: content.trim(),
+        })
+        .eq('id', editingId);
+      
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notes'] });
       setTitle("");
       setContent("");
       setEditingId(null);
-    }
+      toast.success("Note updated successfully");
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+
+  const deleteNote = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from('notes')
+        .delete()
+        .eq('id', id);
+      
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notes'] });
+      if (editingId) {
+        setTitle("");
+        setContent("");
+        setEditingId(null);
+      }
+      toast.success("Note deleted successfully");
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+
+  const handleEditNote = (note: Note) => {
+    setTitle(note.title);
+    setContent(note.content || "");
+    setEditingId(note.id);
   };
+
+  if (isLoading) {
+    return (
+      <div className="text-center p-8">
+        <p>Loading notes...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -100,7 +160,10 @@ const NotesTab = () => {
           >
             Cancel
           </Button>
-          <Button onClick={editingId ? handleUpdateNote : handleCreateNote}>
+          <Button 
+            onClick={() => editingId ? updateNote.mutate() : createNote.mutate()}
+            disabled={!title.trim()}
+          >
             {editingId ? "Update Note" : "Add Note"}
           </Button>
         </CardFooter>
@@ -140,7 +203,7 @@ const NotesTab = () => {
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={() => handleDeleteNote(note.id)}
+                  onClick={() => deleteNote.mutate(note.id)}
                 >
                   <Trash2 className="h-4 w-4 mr-2" />
                   Delete
