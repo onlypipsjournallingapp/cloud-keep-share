@@ -1,3 +1,4 @@
+
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -44,18 +45,7 @@ const MediaTab = () => {
 
       const storagePath = `${user.id}/${Date.now()}-${file.name}`;
 
-      // Check if the bucket exists first
-      const { data: buckets } = await supabase
-        .storage
-        .listBuckets();
-      
-      const bucketExists = buckets?.some(bucket => bucket.name === 'user-files');
-      
-      if (!bucketExists) {
-        throw new Error("Storage bucket 'user-files' not found. Please check your Supabase configuration.");
-      }
-
-      // Upload to storage with correct bucket name
+      // Upload to storage
       const { error: uploadError, data } = await supabase.storage
         .from('user-files')
         .upload(storagePath, file, {
