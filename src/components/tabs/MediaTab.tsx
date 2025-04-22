@@ -3,7 +3,7 @@ import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Image, Video, Eye, Trash2 } from "lucide-react";
+import { Image, Video, Eye, Trash2, AlertCircle } from "lucide-react";
 import FileUploader from "@/components/FileUploader";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
@@ -50,7 +50,8 @@ const MediaTab = () => {
         .from('user-files')
         .upload(storagePath, file, {
           cacheControl: '3600',
-          upsert: false
+          upsert: false,
+          contentType: file.type // Explicitly set the content type
         });
 
       if (uploadError) throw uploadError;
@@ -195,22 +196,42 @@ const MediaTab = () => {
 
 const MediaCard = ({ item, onDelete }: { item: MediaItem; onDelete: (item: MediaItem) => void }) => {
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
+  const [isError, setIsError] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
   React.useEffect(() => {
     const loadMediaUrl = async () => {
       try {
-        const { data } = await supabase.storage
-          .from('user-files')
-          .getPublicUrl(item.storage_path);
+        setIsLoading(true);
+        setIsError(false);
         
-        if (data.publicUrl) {
-          setMediaUrl(data.publicUrl);
-          console.log("Media URL loaded:", data.publicUrl);
+        // First try to get a signed URL that works for both public and private buckets
+        const { data, error } = await supabase.storage
+          .from('user-files')
+          .createSignedUrl(item.storage_path, 60 * 60); // 1 hour expiry
+          
+        if (error || !data?.signedUrl) {
+          console.error("Signed URL error:", error);
+          // Fallback to public URL if signed URL fails
+          const { data: publicUrlData } = await supabase.storage
+            .from('user-files')
+            .getPublicUrl(item.storage_path);
+          
+          if (publicUrlData.publicUrl) {
+            console.log("Using public URL instead:", publicUrlData.publicUrl);
+            setMediaUrl(publicUrlData.publicUrl);
+          } else {
+            throw new Error("Failed to get media URL");
+          }
         } else {
-          console.error("No public URL returned for media item:", item);
+          setMediaUrl(data.signedUrl);
+          console.log("Media signed URL loaded:", data.signedUrl);
         }
       } catch (error) {
         console.error("Error loading media URL:", error);
+        setIsError(true);
+      } finally {
+        setIsLoading(false);
       }
     };
     
@@ -219,50 +240,69 @@ const MediaCard = ({ item, onDelete }: { item: MediaItem; onDelete: (item: Media
 
   const isImage = item.file_type.startsWith("image/");
 
+  const handleMediaError = () => {
+    console.error(`Failed to load ${isImage ? 'image' : 'video'}: ${mediaUrl}`);
+    setIsError(true);
+  };
+
   return (
     <Card className="overflow-hidden">
       <div className="aspect-video relative bg-muted flex items-center justify-center">
-        {mediaUrl ? (
+        {isLoading ? (
+          <div className="text-center p-4">
+            <p className="text-sm text-muted-foreground">Loading media...</p>
+          </div>
+        ) : isError ? (
+          <div className="text-center p-4">
+            <AlertCircle className="h-10 w-10 text-destructive mx-auto mb-2" />
+            <p className="text-sm text-muted-foreground">
+              Failed to load media. Format may be unsupported or file might be corrupted.
+            </p>
+          </div>
+        ) : mediaUrl ? (
           isImage ? (
             <img
               src={mediaUrl}
               alt={item.filename}
               className="w-full h-full object-cover"
-              onError={(e) => {
-                console.error("Image failed to load:", mediaUrl);
-                (e.target as HTMLImageElement).src = "/placeholder.svg";
-              }}
+              onError={handleMediaError}
             />
           ) : (
             <video
               src={mediaUrl}
               controls
               className="w-full h-full object-contain"
-              onError={(e) => {
-                console.error("Video failed to load:", mediaUrl);
-                const element = e.target as HTMLVideoElement;
-                element.poster = "/placeholder.svg";
-              }}
-            />
+              onError={handleMediaError}
+            >
+              Your browser does not support this video format.
+            </video>
           )
-        ) : (
-          <div className="text-center p-4">
-            <p className="text-sm text-muted-foreground">Loading media...</p>
-          </div>
-        )}
+        ) : null}
       </div>
       <div className="p-3">
         <p className="text-sm font-medium truncate">{item.filename}</p>
         <div className="flex justify-between mt-3">
-          <Button variant="outline" size="sm" asChild>
-            <a
-              href={mediaUrl || '#'}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <Eye className="h-3.5 w-3.5 mr-1" />
-              View
-            </a>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            disabled={!mediaUrl || isError}
+            asChild={!(!mediaUrl || isError)}
+          >
+            {(!mediaUrl || isError) ? (
+              <span>
+                <Eye className="h-3.5 w-3.5 mr-1" />
+                View
+              </span>
+            ) : (
+              <a
+                href={mediaUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Eye className="h-3.5 w-3.5 mr-1" />
+                View
+              </a>
+            )}
           </Button>
           <Button
             variant="destructive"
