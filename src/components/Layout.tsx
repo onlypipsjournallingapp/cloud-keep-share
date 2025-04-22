@@ -6,7 +6,8 @@ import NotesTab from "@/components/tabs/NotesTab";
 import LinksTab from "@/components/tabs/LinksTab";
 import FilesTab from "@/components/tabs/FilesTab";
 import MediaTab from "@/components/tabs/MediaTab";
-import { FileText, Link, Image, StickyNote, LogOut } from "lucide-react";
+import ToDoTab from "@/components/tabs/ToDoTab";
+import { FileText, Link, Image, StickyNote, LogOut, ListTodo } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
@@ -44,7 +45,7 @@ const Layout = () => {
       </div>
       
       <Tabs defaultValue="notes" className="w-full">
-        <TabsList className="grid grid-cols-4 mb-6">
+        <TabsList className="grid grid-cols-5 mb-6">
           <TabsTrigger value="notes">
             <StickyNote className="h-4 w-4 mr-2" />
             <span className="hidden sm:inline">Notes</span>
@@ -60,6 +61,10 @@ const Layout = () => {
           <TabsTrigger value="media">
             <Image className="h-4 w-4 mr-2" />
             <span className="hidden sm:inline">Media</span>
+          </TabsTrigger>
+          <TabsTrigger value="todo">
+            <ListTodo className="h-4 w-4 mr-2" />
+            <span className="hidden sm:inline">To-Do List</span>
           </TabsTrigger>
         </TabsList>
         
@@ -77,6 +82,10 @@ const Layout = () => {
         
         <TabsContent value="media" className="space-y-4">
           <MediaTab />
+        </TabsContent>
+
+        <TabsContent value="todo" className="space-y-4">
+          <ToDoTab />
         </TabsContent>
       </Tabs>
       
