@@ -1,4 +1,3 @@
-
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -210,14 +209,9 @@ const MediaCard = ({ item, onDelete }: { item: MediaItem; onDelete: (item: Media
   React.useEffect(() => {
     const loadMediaUrl = async () => {
       try {
-        const { data, error } = await supabase.storage
+        const { data } = await supabase.storage
           .from('user-files')
           .getPublicUrl(item.storage_path);
-        
-        if (error) {
-          console.error("Error getting public URL:", error);
-          return;
-        }
         
         if (data.publicUrl) {
           setMediaUrl(data.publicUrl);
