@@ -45,8 +45,8 @@ const MediaTab = () => {
 
       const storagePath = `${user.id}/${Date.now()}-${file.name}`;
 
-      // Upload to storage
-      const { error: uploadError } = await supabase.storage
+      // Upload to storage - ensure we're using the correct bucket name
+      const { error: uploadError, data } = await supabase.storage
         .from('user-files')
         .upload(storagePath, file);
 
@@ -68,7 +68,8 @@ const MediaTab = () => {
       toast.success("Media uploaded successfully");
     },
     onError: (error: Error) => {
-      toast.error(error.message);
+      toast.error(`Upload failed: ${error.message}`);
+      console.error("Upload error:", error);
     },
   });
 
@@ -94,7 +95,8 @@ const MediaTab = () => {
       toast.success("Media deleted successfully");
     },
     onError: (error: Error) => {
-      toast.error(error.message);
+      toast.error(`Delete failed: ${error.message}`);
+      console.error("Delete error:", error);
     },
   });
 
@@ -113,14 +115,6 @@ const MediaTab = () => {
     mediaFiles.forEach(file => {
       uploadMedia.mutate(file);
     });
-  };
-
-  const getMediaUrl = async (path: string) => {
-    const { data } = await supabase.storage
-      .from('user-files')
-      .getPublicUrl(path);
-    
-    return data.publicUrl;
   };
 
   const images = media.filter(item => item.file_type.startsWith("image/"));
@@ -201,11 +195,22 @@ const MediaCard = ({ item, onDelete }: { item: MediaItem; onDelete: (item: Media
 
   React.useEffect(() => {
     const loadMediaUrl = async () => {
-      const url = await supabase.storage
-        .from('user-files')
-        .getPublicUrl(item.storage_path);
-      setMediaUrl(url.data.publicUrl);
+      try {
+        const url = await supabase.storage
+          .from('user-files')
+          .getPublicUrl(item.storage_path);
+        
+        if (url.data.publicUrl) {
+          setMediaUrl(url.data.publicUrl);
+          console.log("Media URL loaded:", url.data.publicUrl);
+        } else {
+          console.error("No public URL returned for media item:", item);
+        }
+      } catch (error) {
+        console.error("Error loading media URL:", error);
+      }
     };
+    
     loadMediaUrl();
   }, [item.storage_path]);
 
@@ -213,21 +218,34 @@ const MediaCard = ({ item, onDelete }: { item: MediaItem; onDelete: (item: Media
 
   return (
     <Card className="overflow-hidden">
-      <div className="aspect-video relative bg-muted">
-        {mediaUrl && (
+      <div className="aspect-video relative bg-muted flex items-center justify-center">
+        {mediaUrl ? (
           isImage ? (
             <img
               src={mediaUrl}
               alt={item.filename}
               className="w-full h-full object-cover"
+              onError={(e) => {
+                console.error("Image failed to load:", mediaUrl);
+                (e.target as HTMLImageElement).src = "/placeholder.svg";
+              }}
             />
           ) : (
             <video
               src={mediaUrl}
               controls
               className="w-full h-full object-contain"
+              onError={(e) => {
+                console.error("Video failed to load:", mediaUrl);
+                const element = e.target as HTMLVideoElement;
+                element.poster = "/placeholder.svg";
+              }}
             />
           )
+        ) : (
+          <div className="text-center p-4">
+            <p className="text-sm text-muted-foreground">Loading media...</p>
+          </div>
         )}
       </div>
       <div className="p-3">
