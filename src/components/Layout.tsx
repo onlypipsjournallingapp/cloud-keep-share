@@ -10,6 +10,7 @@ import { FileText, Link, Image, StickyNote, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 
 const Layout = () => {
   const navigate = useNavigate();
@@ -18,8 +19,10 @@ const Layout = () => {
     try {
       await supabase.auth.signOut();
       navigate("/auth");
+      toast.success("Logged out successfully");
     } catch (error) {
       console.error("Error logging out:", error);
+      toast.error("Error logging out. Please try again.");
     }
   };
 

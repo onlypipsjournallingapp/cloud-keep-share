@@ -45,10 +45,24 @@ const MediaTab = () => {
 
       const storagePath = `${user.id}/${Date.now()}-${file.name}`;
 
-      // Upload to storage - ensure we're using the correct bucket name
+      // Check if the bucket exists first
+      const { data: buckets } = await supabase
+        .storage
+        .listBuckets();
+      
+      const bucketExists = buckets?.some(bucket => bucket.name === 'user-files');
+      
+      if (!bucketExists) {
+        throw new Error("Storage bucket 'user-files' not found. Please check your Supabase configuration.");
+      }
+
+      // Upload to storage with correct bucket name
       const { error: uploadError, data } = await supabase.storage
         .from('user-files')
-        .upload(storagePath, file);
+        .upload(storagePath, file, {
+          cacheControl: '3600',
+          upsert: false
+        });
 
       if (uploadError) throw uploadError;
 
@@ -196,13 +210,18 @@ const MediaCard = ({ item, onDelete }: { item: MediaItem; onDelete: (item: Media
   React.useEffect(() => {
     const loadMediaUrl = async () => {
       try {
-        const url = await supabase.storage
+        const { data, error } = await supabase.storage
           .from('user-files')
           .getPublicUrl(item.storage_path);
         
-        if (url.data.publicUrl) {
-          setMediaUrl(url.data.publicUrl);
-          console.log("Media URL loaded:", url.data.publicUrl);
+        if (error) {
+          console.error("Error getting public URL:", error);
+          return;
+        }
+        
+        if (data.publicUrl) {
+          setMediaUrl(data.publicUrl);
+          console.log("Media URL loaded:", data.publicUrl);
         } else {
           console.error("No public URL returned for media item:", item);
         }
