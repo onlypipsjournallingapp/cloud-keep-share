@@ -5,10 +5,12 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/componen
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Edit, Trash2 } from "lucide-react";
+import { Plus, Edit, Trash2, Maximize } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 type Note = {
   id: string;
@@ -23,6 +25,10 @@ const NotesTab = () => {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
+  
+  // State for the view full note dialog
+  const [viewingNote, setViewingNote] = useState<Note | null>(null);
+  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
 
   const { data: notes = [], isLoading } = useQuery({
     queryKey: ['notes'],
@@ -117,6 +123,11 @@ const NotesTab = () => {
     setContent(note.content || "");
     setEditingId(note.id);
   };
+  
+  const handleViewFullNote = (note: Note) => {
+    setViewingNote(note);
+    setIsViewDialogOpen(true);
+  };
 
   if (isLoading) {
     return (
@@ -146,6 +157,7 @@ const NotesTab = () => {
               className="min-h-[120px]"
               value={content}
               onChange={(e) => setContent(e.target.value)}
+              autoExpand={true}
             />
           </div>
         </CardContent>
@@ -191,28 +203,73 @@ const NotesTab = () => {
                   {note.content || "No content"}
                 </p>
               </CardContent>
-              <CardFooter className="flex justify-between">
+              <CardFooter className="flex justify-between flex-wrap gap-2">
                 <Button
                   size="sm"
-                  variant="ghost"
-                  onClick={() => handleEditNote(note)}
+                  variant="outline"
+                  onClick={() => handleViewFullNote(note)}
                 >
-                  <Edit className="h-4 w-4 mr-2" />
-                  Edit
+                  <Maximize className="h-4 w-4 mr-2" />
+                  View Full
                 </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => deleteNote.mutate(note.id)}
-                >
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  Delete
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => handleEditNote(note)}
+                  >
+                    <Edit className="h-4 w-4 mr-2" />
+                    Edit
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => deleteNote.mutate(note.id)}
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete
+                  </Button>
+                </div>
               </CardFooter>
             </Card>
           ))}
         </div>
       )}
+
+      {/* Full Note View Dialog */}
+      <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
+        <DialogContent className="max-w-3xl max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="text-xl">{viewingNote?.title}</DialogTitle>
+          </DialogHeader>
+          
+          <ScrollArea className="flex-1 my-4">
+            <div className="p-2 whitespace-pre-wrap">
+              {viewingNote?.content || "No content"}
+            </div>
+          </ScrollArea>
+          
+          <DialogFooter className="flex justify-between">
+            <Button 
+              variant="outline" 
+              onClick={() => setIsViewDialogOpen(false)}
+            >
+              Close
+            </Button>
+            <Button 
+              onClick={() => {
+                if (viewingNote) {
+                  handleEditNote(viewingNote);
+                  setIsViewDialogOpen(false);
+                }
+              }}
+            >
+              <Edit className="h-4 w-4 mr-2" />
+              Edit Note
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
