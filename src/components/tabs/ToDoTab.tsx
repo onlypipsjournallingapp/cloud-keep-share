@@ -1,11 +1,14 @@
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Square, SquareCheck, Plus, Trash2 } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
+import { toast } from "sonner";
 
 type Todo = {
-  id: number;
+  id: string;
   text: string;
   completed: boolean;
 };
@@ -13,31 +16,100 @@ type Todo = {
 const ToDoTab = () => {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [input, setInput] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const { user } = useAuth();
 
-  const addTodo = () => {
-    if (input.trim() === "") return;
-    setTodos([
-      { id: Date.now(), text: input.trim(), completed: false },
-      ...todos,
-    ]);
-    setInput("");
+  useEffect(() => {
+    if (user) {
+      fetchTodos();
+    }
+  }, [user]);
+
+  const fetchTodos = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("todos")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      setTodos(data || []);
+    } catch (error) {
+      console.error("Error fetching todos:", error);
+      toast.error("Failed to load todos");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const toggleTodo = (id: number) => {
-    setTodos(todos =>
-      todos.map(todo =>
-        todo.id === id ? { ...todo, completed: !todo.completed } : todo
-      )
+  const addTodo = async () => {
+    if (!user || input.trim() === "") return;
+
+    try {
+      const { data, error } = await supabase
+        .from("todos")
+        .insert([{ text: input.trim(), user_id: user.id }])
+        .select()
+        .single();
+
+      if (error) throw error;
+      
+      setTodos([data, ...todos]);
+      setInput("");
+      toast.success("Todo added successfully");
+    } catch (error) {
+      console.error("Error adding todo:", error);
+      toast.error("Failed to add todo");
+    }
+  };
+
+  const toggleTodo = async (id: string, completed: boolean) => {
+    try {
+      const { error } = await supabase
+        .from("todos")
+        .update({ completed: !completed })
+        .eq("id", id);
+
+      if (error) throw error;
+
+      setTodos(todos =>
+        todos.map(todo =>
+          todo.id === id ? { ...todo, completed: !completed } : todo
+        )
+      );
+    } catch (error) {
+      console.error("Error updating todo:", error);
+      toast.error("Failed to update todo");
+    }
+  };
+
+  const deleteTodo = async (id: string) => {
+    try {
+      const { error } = await supabase
+        .from("todos")
+        .delete()
+        .eq("id", id);
+
+      if (error) throw error;
+
+      setTodos(todos => todos.filter(todo => todo.id !== id));
+      toast.success("Todo deleted successfully");
+    } catch (error) {
+      console.error("Error deleting todo:", error);
+      toast.error("Failed to delete todo");
+    }
+  };
+
+  if (!user) {
+    return (
+      <div className="text-center text-muted-foreground p-8">
+        <p>Please log in to manage your todos</p>
+      </div>
     );
-  };
-
-  const deleteTodo = (id: number) => {
-    setTodos(todos => todos.filter(todo => todo.id !== id));
-  };
+  }
 
   return (
     <div className="space-y-4">
-      {/* Add Todo section */}
       <div className="flex gap-2">
         <Input
           placeholder="Add a new task…"
@@ -53,9 +125,12 @@ const ToDoTab = () => {
         </Button>
       </div>
 
-      {/* Todos list */}
       <div>
-        {todos.length === 0 ? (
+        {isLoading ? (
+          <div className="text-center text-muted-foreground p-8">
+            <p>Loading...</p>
+          </div>
+        ) : todos.length === 0 ? (
           <div className="text-center text-muted-foreground p-8">
             <p className="mb-2">No to-dos yet</p>
             <p className="text-sm">Start by adding your first task above!</p>
@@ -71,7 +146,7 @@ const ToDoTab = () => {
                   type="button"
                   aria-label="Toggle complete"
                   className="mr-3"
-                  onClick={() => toggleTodo(todo.id)}
+                  onClick={() => toggleTodo(todo.id, todo.completed)}
                   tabIndex={0}
                 >
                   {todo.completed ? (
